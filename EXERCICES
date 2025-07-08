@@ -1,0 +1,159 @@
+-- Partie 1 : Requêtes SQL basiques
+-- Création de la base de données
+CREATE DATABASE bibliotheque_db;
+--CREATE DATABASE bibliotheque_db;
+-- Table Utilisateurs
+CREATE TABLE Utilisateurs (
+    id_utilisateur SERIAL PRIMARY KEY,
+    nom VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    role VARCHAR(20) CHECK (role IN ('lecteur', 'bibliothecaire', 'admin')) NOT NULL);
+
+-- Table Livre
+CREATE TABLE Livre (
+    id_livre SERIAL PRIMARY KEY,
+    titre VARCHAR(150) NOT NULL,
+    auteur VARCHAR(100),
+    categorie VARCHAR(50),
+    disponible BOOLEAN DEFAULT TRUE);
+
+-- Table Emprunts
+CREATE TABLE Emprunts (
+    id_emprunts SERIAL PRIMARY KEY,
+    id_utilisateur INTEGER REFERENCES Utilisateurs(id_utilisateur) ON DELETE CASCADE,
+    id_livre INTEGER REFERENCES Livre(id_livre) ON DELETE CASCADE,
+    date_emprunt DATE NOT NULL,
+    date_retour_prevue DATE NOT NULL,
+    date_retour_reelle DATE);
+
+-- Table Commentaires
+CREATE TABLE Commentaires (
+    id_commentaire SERIAL PRIMARY KEY,
+    id_utilisateur INTEGER REFERENCES Utilisateurs(id_utilisateur) ON DELETE CASCADE,
+    id_livre INTEGER REFERENCES Livre(id_livre) ON DELETE CASCADE,
+    texte TEXT,
+    note INTEGER CHECK (note BETWEEN 1 AND 5));
+--insertion des données
+--table utilisateur
+INSERT INTO Utilisateurs (id_utilisateur, nom, email, role) VALUES
+(1, 'Alice Martin', 'alice.martin@mail.com', 'lecteur'),
+(2, 'John Doe', 'john.doe@mail.com', 'bibliothecaire'),
+(3, 'Sarah Lopez', 'sarah.lopez@mail.com', 'lecteur'),
+(4, 'Marc Dupont', 'marc.dupont@mail.com', 'admin'),
+(5, 'Emma Bernard', 'emma.bernard@mail.com', 'bibliothecaire'),
+(6, 'Thomas Durand', 'thomas.durand@mail.com', 'lecteur');
+--table livre
+INSERT INTO Livre (id_livre, titre, auteur, categorie, disponible) VALUES
+(1, 'L''Étranger', 'Albert Camus', 'Roman', TRUE),
+(2, '1984', 'George Orwell', 'Science-fiction', FALSE),
+(3, 'Le Petit Prince', 'Antoine de Saint-Ex.', 'Conte', TRUE),
+(4, 'Dune', 'Frank Herbert', 'Science-fiction', FALSE),
+(5, 'Les Misérables', 'Victor Hugo', 'Classique', TRUE),
+(6, 'Sapiens', 'Yuval Noah Harari', 'Histoire', TRUE);
+--table emprunt
+INSERT INTO Emprunts (id_emprunts, id_utilisateur, id_livre, date_emprunt, date_retour_prevue, date_retour_reelle) VALUES
+(1, 1, 2, '2024-06-01', '2024-06-15', NULL),
+(2, 3, 4, '2024-06-20', '2024-07-05', '2024-07-03'),
+(3, 6, 2, '2024-05-10', '2024-05-25', '2024-05-24'),
+(4, 1, 4, '2024-07-01', '2024-07-15', NULL);
+--table commentaires
+INSERT INTO Commentaires (id_commentaire, id_utilisateur, id_livre, texte, note) VALUES
+(1, 1, 2, 'Un classique à lire absolument', 5),
+(2, 3, 4, 'Très dense, mais fascinant', 4),
+(3, 6, 2, 'Excellent, mais un peu long', 4),
+(4, 1, 4, 'Très bon roman de SF', 5),
+(5, 3, 1, 'Lecture facile et intéressante', 3);
+
+--Lister tous les livres disponibles
+SELECT * FROM Livre WHERE disponible = TRUE;
+--Afficher les utilisateurs ayant le rôle ‘bibliothecaire’
+SELECT * FROM Utilisateurs WHERE role = 'bibliothecaire';
+--Emprunts en retard (non retournés et date prévue < aujourd’hui)
+SELECT * FROM Emprunts
+WHERE date_retour_reelle IS NULL AND date_retour_prevue < CURRENT_DATE;
+--Nombre total d’emprunts
+SELECT COUNT(*) AS total_emprunts FROM Emprunts;
+--Les 5 derniers commentaires avec nom utilisateur et titre livre
+SELECT u.nom, l.titre, c.texte, c.note
+FROM Commentaires c
+JOIN Utilisateurs u ON c.id_utilisateur = u.id_utilisateur
+JOIN Livre l ON c.id_livre = l.id_livre
+ORDER BY c.id_commentaire DESC
+LIMIT 5;
+--Partie 2 : Requêtes SQL avancées
+--Nombre de livres empruntés par utilisateur
+SELECT u.nom, COUNT(e.id_emprunts) AS nb_emprunts
+FROM Utilisateurs u
+LEFT JOIN Emprunts e ON u.id_utilisateur = e.id_utilisateur
+GROUP BY u.id_utilisateur;
+--Livres jamais empruntés
+SELECT * FROM Livre
+WHERE id_livre NOT IN (
+    SELECT id_livre FROM Emprunts);
+--Durée moyenne de prêt par livre (en jours)
+SELECT l.titre,
+       AVG(date_retour_reelle - date_emprunt) AS duree_moyenne
+FROM Emprunts e
+JOIN Livre l ON e.id_livre = l.id_livre
+WHERE date_retour_reelle IS NOT NULL
+GROUP BY l.id_livre, l.titre;
+--Les 3 livres les mieux notés (par moyenne des notes)
+SELECT l.titre, AVG(c.note) AS note_moyenne
+FROM Commentaires c
+JOIN Livre l ON c.id_livre = l.id_livre
+GROUP BY l.id_livre, l.titre
+ORDER BY note_moyenne DESC
+LIMIT 3;
+--Utilisateurs ayant emprunté un livre de catégorie "Science-fiction"
+SELECT DISTINCT u.nom
+FROM Utilisateurs u
+JOIN Emprunts e ON u.id_utilisateur = e.id_utilisateur
+JOIN Livre l ON e.id_livre = l.id_livre
+WHERE l.categorie = 'Science-fiction';
+
+--Partie 3 : Mises à jour & transactions
+--Mettre 'disponible = FALSE' pour les livres empruntés non rendus
+UPDATE Livre
+SET disponible = 'FALSE'
+WHERE id_livre IN (
+    SELECT id_livre FROM Emprunts
+    WHERE date_retour_reelle IS NULL);
+SELECT * FROM livre;
+--Transaction pour emprunter un livre
+BEGIN;
+-- Met à jour uniquement si le livre est disponible
+UPDATE Livre
+SET disponible = FALSE
+WHERE id_livre = 1 AND disponible = TRUE;
+-- Vérifie que le livre a bien été mis à jour (donc qu’il était dispo)
+-- Si ROW_COUNT = 1 → continuer
+-- Sinon → faire ROLLBACK
+-- Puis insérer l’emprunt
+INSERT INTO Emprunts (id_utilisateur, id_livre, date_emprunt, date_retour_prevue)
+VALUES (1, 1, CURRENT_DATE, CURRENT_DATE + INTERVAL '14 days');
+COMMIT;
+-- permet d'annuler la transaction pour remettre PostgreSQL dans un état normal 
+ROLLBACK;
+
+--Partie 4 : Vues et fonctions SQL
+-- Vue Vue_Emprunts_Actifs (emprunts en cours, pas encore rendus)
+CREATE OR REPLACE VIEW Vue_Emprunts_Actifs AS
+SELECT e.id_emprunts,e.id_utilisateur,u.nom AS utilisateur,e.id_livre,l.titre AS livre,e.date_emprunt,e.date_retour_prevue,e.date_retour_reelle
+FROM Emprunts e
+JOIN Utilisateurs u ON e.id_utilisateur = u.id_utilisateur
+JOIN Livre l ON e.id_livre = l.id_livre
+WHERE e.date_retour_reelle IS NULL;
+--TESTER LA REQUETE
+SELECT * FROM Vue_Emprunts_Actifs;
+-- Fonction nb_emprunts_utilisateur(id_utilisateur)
+CREATE OR REPLACE FUNCTION nb_emprunts_utilisateur(uid INT)
+RETURNS INT AS $$
+BEGIN
+    RETURN (
+        SELECT COUNT(*)
+        FROM Emprunts
+        WHERE id_utilisateur = uid);
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT nb_emprunts_utilisateur(1);
